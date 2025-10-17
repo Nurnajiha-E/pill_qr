@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/nurnajiha/build/static/css/main.e6c13ad2.css",
+    "main.js": "/nurnajiha/build/static/js/main.5337fd83.js",
+    "static/js/453.1dd4bddc.chunk.js": "/nurnajiha/build/static/js/453.1dd4bddc.chunk.js",
+    "index.html": "/nurnajiha/build/index.html",
+    "main.e6c13ad2.css.map": "/nurnajiha/build/static/css/main.e6c13ad2.css.map",
+    "main.5337fd83.js.map": "/nurnajiha/build/static/js/main.5337fd83.js.map",
+    "453.1dd4bddc.chunk.js.map": "/nurnajiha/build/static/js/453.1dd4bddc.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.e6c13ad2.css",
+    "static/js/main.5337fd83.js"
+  ]
+}
