@@ -12,14 +12,15 @@ export default function MedicineQRApp() {
   const [medicines, setMedicines] = useState([]);
   const [templates, setTemplates] = useState({
     medicineName: ['ยาพารา', 'ยาแก้ไอ', 'ยาแก้แพ้'],
-    dosage: ['ครั้งละ 1 เม็ด', 'ครั้งละ 2 เม็ด', 'ครั้งละ 1 ช้อนชา'],
-    timing: ['หลังอาหาร', 'ก่อนอาหาร', 'ก่อนนอน']
+    dosage: ['1 เม็ด', '2 เม็ด', '3 เม็ด'],
+    timing: ['หลังอาหาร', 'ก่อนอาหาร',]
   });
   
   const [selectedValues, setSelectedValues] = useState({});
   const [qrCodes, setQrCodes] = useState([]);
   const [editingTemplateCategory, setEditingTemplateCategory] = useState(null);
   const [newTemplateValue, setNewTemplateValue] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   // โหลดข้อมูลจาก localStorage เมื่อเปิดแอพ
   useEffect(() => {
@@ -68,8 +69,14 @@ export default function MedicineQRApp() {
 
   // ลบยา
   const deleteMedicine = (id) => {
-    if (confirm('ต้องการลบรายการนี้?')) {
-      updateMedicinesStorage(medicines.filter(m => m.id !== id));
+    setDeleteConfirm(id);
+  };
+
+  // ยืนยันการลบ
+  const confirmDelete = () => {
+    if (deleteConfirm) {
+      updateMedicinesStorage(medicines.filter(m => m.id !== deleteConfirm));
+      setDeleteConfirm(null);
     }
   };
 
@@ -175,8 +182,8 @@ export default function MedicineQRApp() {
 
   return (
     <div className="container py-4" style={{ maxWidth: '1200px' }}>
-      <h1 className="text-center mb-2">💊 ระบบจัดการข้อบ่งใช้ยา QR Code</h1>
-      <p className="text-center text-muted mb-4">ไม่ต้อง Backend - เก็บข้อมูลในเบราว์เซอร์</p>
+      <h1 className="text-center mb-2">ระบบจัดการข้อบ่งใช้ยาและ สร้างQR Code</h1>
+
 
       {/* ฟอร์มเพิ่มยา */}
       <div className="card mb-4 shadow-sm">
@@ -227,15 +234,15 @@ export default function MedicineQRApp() {
                     className="btn btn-sm btn-outline-primary mt-2 w-100"
                     onClick={() => setEditingTemplateCategory(category)}
                   >
-                    <Plus size={14} /> เพิ่มรายการ
+                    <Plus size={14} />เพิ่มรายการใหม่
                   </button>
                 )}
               </div>
             ))}
           </div>
 
-          <button className="btn btn-primary w-100 btn-lg" onClick={addMedicine}>
-            <Plus size={18} /> เพิ่มข้อบ่งใช้ยา
+          <button className="btn btn-success w-100 btn-lg" onClick={addMedicine}>
+            เพิ่มข้อบ่งใช้ยา
           </button>
         </div>
       </div>
@@ -265,7 +272,7 @@ export default function MedicineQRApp() {
       {medicines.length > 0 && (
         <div className="card mb-4 shadow-sm">
           <div className="card-body">
-            <h5 className="card-title mb-3">📱 สร้าง QR Code</h5>
+            <h5 className="card-title mb-3"> สร้าง QR Code</h5>
             
             <button
               className="btn btn-success btn-lg w-100 mb-3"
@@ -321,6 +328,27 @@ export default function MedicineQRApp() {
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" 
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999 }}>
+          <div className="card" style={{ width: '300px' }}>
+            <div className="card-body">
+              <h5 className="card-title">ยืนยันการลบ</h5>
+              <p className="text-muted">ต้องการลบรายการนี้จริงหรือ?</p>
+              <div className="d-flex gap-2">
+                <button className="btn btn-danger flex-grow-1" onClick={confirmDelete}>
+                  ลบ
+                </button>
+                <button className="btn btn-secondary flex-grow-1" onClick={() => setDeleteConfirm(null)}>
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
     </div>
   );
@@ -329,6 +357,7 @@ export default function MedicineQRApp() {
 function MedicineItem({ medicine, onDelete, onUpdate }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(medicine.text);
+  const [showDeleteBtn, setShowDeleteBtn] = useState(false);
 
   const handleSave = () => {
     if (editText.trim()) {
