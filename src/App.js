@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Printer, Plus, Trash2, Edit2, Save, X } from 'lucide-react';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
-// สำหรับ QR Code ใช้ API
+// สำหรับ QR Code ใช้ API (ไม่ต้องแก้)
 const generateQRCode = (text) => {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(text)}`;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(text)}`;
 };
 
 export default function MedicineQRApp() {
@@ -14,275 +16,236 @@ export default function MedicineQRApp() {
     timing: ['หลังอาหาร', 'ก่อนอาหาร', 'ก่อนนอน']
   });
   
-  const [selectedMedicine, setSelectedMedicine] = useState({ medicineName: '', dosage: '', timing: '' });
-  const [customText, setCustomText] = useState('');
-  const [qrText, setQrText] = useState('');
-  const [editingTemplate, setEditingTemplate] = useState(null);
+  const [selectedValues, setSelectedValues] = useState({});
+  const [qrCodes, setQrCodes] = useState([]);
+  const [editingTemplateCategory, setEditingTemplateCategory] = useState(null);
   const [newTemplateValue, setNewTemplateValue] = useState('');
 
-  // โหลดข้อมูลจาก API
+  // โหลดข้อมูลจาก localStorage เมื่อเปิดแอพ
   useEffect(() => {
-    fetchMedicines();
-    fetchTemplates();
+    const savedMedicines = localStorage.getItem('medicines');
+    const savedTemplates = localStorage.getItem('templates');
+    
+    if (savedMedicines) {
+      setMedicines(JSON.parse(savedMedicines));
+    }
+    if (savedTemplates) {
+      setTemplates(JSON.parse(savedTemplates));
+    }
   }, []);
 
-  const fetchMedicines = async () => {
-    try {
-      const response = await fetch('http://localhost/medicine-api/api.php?action=getMedicines');
-      const data = await response.json();
-      if (data.success) {
-        setMedicines(data.data);
-      }
-    } catch (error) {
-      console.error('Error fetching medicines:', error);
-    }
+  // บันทึกยาลง localStorage ทุกครั้งที่มีการเปลี่ยนแปลง
+  const updateMedicinesStorage = (newMedicines) => {
+    setMedicines(newMedicines);
+    localStorage.setItem('medicines', JSON.stringify(newMedicines));
   };
 
-  const fetchTemplates = async () => {
-    try {
-      const response = await fetch('http://localhost/medicine-api/api.php?action=getTemplates');
-      const data = await response.json();
-      if (data.success) {
-        setTemplates(data.data);
-      }
-    } catch (error) {
-      console.error('Error fetching templates:', error);
-    }
+  // บันทึก templates ลง localStorage
+  const updateTemplatesStorage = (newTemplates) => {
+    setTemplates(newTemplates);
+    localStorage.setItem('templates', JSON.stringify(newTemplates));
   };
 
-  const addMedicine = async () => {
-    if (!selectedMedicine.medicineName || !selectedMedicine.dosage || !selectedMedicine.timing) {
-      alert('กรุณาเลือกข้อมูลให้ครบทุกช่อง');
+  // เพิ่มยา (อนุญาตให้มี 1 ค่าก็ได้)
+  const addMedicine = () => {
+    const values = Object.values(selectedValues).filter(v => v);
+    
+    if (values.length === 0) {
+      alert('กรุณาเลือกข้อมูลอย่างน้อย 1 รายการ');
       return;
     }
 
-    const medicineText = `${selectedMedicine.medicineName} ${selectedMedicine.dosage} ${selectedMedicine.timing}`;
-    
-    try {
-      const response = await fetch('http://localhost/medicine-api/api.php?action=addMedicine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: medicineText })
-      });
-      const data = await response.json();
-      if (data.success) {
-        fetchMedicines();
-        setSelectedMedicine({ medicineName: '', dosage: '', timing: '' });
-      }
-    } catch (error) {
-      console.error('Error adding medicine:', error);
+    const medicineText = values.join(' ');
+    const newMedicine = {
+      id: Date.now(),
+      text: medicineText,
+      createdAt: new Date().toISOString()
+    };
+
+    updateMedicinesStorage([newMedicine, ...medicines]);
+    setSelectedValues({});
+  };
+
+  // ลบยา
+  const deleteMedicine = (id) => {
+    if (confirm('ต้องการลบรายการนี้?')) {
+      updateMedicinesStorage(medicines.filter(m => m.id !== id));
     }
   };
 
-  const deleteMedicine = async (id) => {
+  // แก้ไขยา
+  const updateMedicine = (id, newText) => {
+    updateMedicinesStorage(
+      medicines.map(m => m.id === id ? { ...m, text: newText } : m)
+    );
+  };
+
+  // เพิ่ม template ใหม่
+  const addTemplate = (category) => {
+    if (!newTemplateValue.trim()) {
+      alert('กรุณาใส่ข้อมูล');
+      return;
+    }
+
+    const newTemplates = {
+      ...templates,
+      [category]: [...(templates[category] || []), newTemplateValue]
+    };
+
+    updateTemplatesStorage(newTemplates);
+    setNewTemplateValue('');
+    setEditingTemplateCategory(null);
+  };
+
+  // สร้าง QR Code สำหรับแต่ละรายการ
+  const generateQRCodes = () => {
+    if (medicines.length === 0) {
+      alert('ไม่มีรายการยา');
+      return;
+    }
+
+    const codes = medicines.map((medicine, index) => ({
+      id: medicine.id,
+      text: medicine.text,
+      qrUrl: generateQRCode(medicine.text),
+      index: index + 1
+    }));
+
+    setQrCodes(codes);
+  };
+
+  // ดาวน์โหลด QR Code เป็น ZIP
+  const downloadAllQR = async () => {
+    if (qrCodes.length === 0) return;
+
+    const zip = new JSZip();
+
     try {
-      const response = await fetch('http://localhost/medicine-api/api.php?action=deleteMedicine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      const data = await response.json();
-      if (data.success) {
-        fetchMedicines();
+      for (let i = 0; i < qrCodes.length; i++) {
+        const qr = qrCodes[i];
+        const response = await fetch(qr.qrUrl);
+        const blob = await response.blob();
+        zip.file(`medicine-qr-${i + 1}.png`, blob);
       }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, 'medicine-qr-codes.zip');
     } catch (error) {
-      console.error('Error deleting medicine:', error);
+      alert('เกิดข้อผิดพลาดในการดาวน์โหลด');
     }
   };
 
-  const updateMedicineText = async (id, newText) => {
-    try {
-      const response = await fetch('http://localhost/medicine-api/api.php?action=updateMedicine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, text: newText })
-      });
-      const data = await response.json();
-      if (data.success) {
-        fetchMedicines();
-      }
-    } catch (error) {
-      console.error('Error updating medicine:', error);
-    }
-  };
+  // พิมพ์ QR Code ทั้งหมด
+  const printAllQR = () => {
+    if (qrCodes.length === 0) return;
 
-  const addTemplate = async (category) => {
-    if (!newTemplateValue.trim()) return;
-
-    try {
-      const response = await fetch('http://localhost/medicine-api/api.php?action=addTemplate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, value: newTemplateValue })
-      });
-      const data = await response.json();
-      if (data.success) {
-        fetchTemplates();
-        setNewTemplateValue('');
-        setEditingTemplate(null);
-      }
-    } catch (error) {
-      console.error('Error adding template:', error);
-    }
-  };
-
-  const generateFinalText = () => {
-    const text = medicines.map(m => m.text).join('\n');
-    setQrText(text);
-  };
-
-  const downloadQR = () => {
-    const link = document.createElement('a');
-    link.href = generateQRCode(qrText);
-    link.download = 'medicine-qr.png';
-    link.click();
-  };
-
-  const printQR = () => {
     const printWindow = window.open('', '_blank');
+    const content = qrCodes.map((qr) => `
+      <div style="page-break-after: always; padding: 30px; text-align: center;">
+        <h2>ข้อบ่งใช้ยาที่ ${qr.index}</h2>
+        <p style="font-size: 18px; margin: 30px 0; line-height: 1.8;">${qr.text}</p>
+        <img src="${qr.qrUrl}" alt="QR Code" style="max-width: 400px; margin: 30px 0;" />
+      </div>
+    `).join('');
+
     printWindow.document.write(`
       <html>
-        <head><title>Print QR Code</title></head>
-        <body style="text-align: center; padding: 20px;">
-          <h3>ข้อบ่งใช้ยา</h3>
-          <pre style="text-align: left; display: inline-block;">${qrText}</pre>
-          <br><br>
-          <img src="${generateQRCode(qrText)}" alt="QR Code" />
-        </body>
+        <head>
+          <meta charset="UTF-8">
+          <title>พิมพ์ QR Code</title>
+          <style>
+            body { font-family: 'Sarabun', Arial, sans-serif; }
+            @media print { .no-print { display: none; } }
+          </style>
+        </head>
+        <body>${content}</body>
       </html>
     `);
     printWindow.document.close();
     printWindow.print();
   };
 
-  return (
-    <div className="container py-4" style={{ maxWidth: '1000px' }}>
-      <h2 className="text-center mb-4">ระบบจัดการข้อบ่งใช้ยาและ สร้างQR Code</h2>
+  // ดาวน์โหลด QR เดี่ยว
+  const downloadSingleQR = (qr) => {
+    const link = document.createElement('a');
+    link.href = qr.qrUrl;
+    link.download = `medicine-qr-${qr.index}.png`;
+    link.click();
+  };
 
-      {/* เลือกข้อมูล */}
+  return (
+    <div className="container py-4" style={{ maxWidth: '1200px' }}>
+      <h1 className="text-center mb-2">💊 ระบบจัดการข้อบ่งใช้ยา QR Code</h1>
+      <p className="text-center text-muted mb-4">ไม่ต้อง Backend - เก็บข้อมูลในเบราว์เซอร์</p>
+
+      {/* ฟอร์มเพิ่มยา */}
       <div className="card mb-4 shadow-sm">
         <div className="card-body">
-          <h5 className="card-title mb-3">เพิ่มข้อบ่งใช้ยา</h5>
+          <h5 className="card-title mb-3">➕ เพิ่มข้อบ่งใช้ยา</h5>
           
-          <div className="row g-3">
-            <div className="col-md-4">
-              <label className="form-label">ชื่อยา</label>
-              <select 
-                className="form-select"
-                value={selectedMedicine.medicineName}
-                onChange={(e) => setSelectedMedicine({...selectedMedicine, medicineName: e.target.value})}
-              >
-                <option value="">เลือกยา</option>
-                {templates.medicineName.map((med, i) => (
-                  <option key={i} value={med}>{med}</option>
-                ))}
-              </select>
-              {editingTemplate === 'medicineName' ? (
-                <div className="input-group mt-2">
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="เพิ่มยาใหม่"
-                    value={newTemplateValue}
-                    onChange={(e) => setNewTemplateValue(e.target.value)}
-                  />
-                  <button className="btn btn-sm btn-success" onClick={() => addTemplate('medicineName')}>
-                    <Save size={14} />
-                  </button>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setEditingTemplate(null)}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ) : (
-                <button className="btn btn-sm btn-outline-primary mt-2" onClick={() => setEditingTemplate('medicineName')}>
-                  <Plus size={14} /> เพิ่มยา
-                </button>
-              )}
-            </div>
+          <div className="row g-3 mb-3">
+            {Object.entries(templates).map(([category, values]) => (
+              <div key={category} className="col-md-4">
+                <label className="form-label text-capitalize fw-bold">
+                  {category === 'medicineName' && '🩹 ชื่อยา'}
+                  {category === 'dosage' && '📊 ปริมาณการกิน'}
+                  {category === 'timing' && '⏰ เวลา'}
+                </label>
+                <select 
+                  className="form-select"
+                  value={selectedValues[category] || ''}
+                  onChange={(e) => setSelectedValues({...selectedValues, [category]: e.target.value})}
+                >
+                  <option value="">-- เลือก --</option>
+                  {values.map((item, i) => (
+                    <option key={i} value={item}>{item}</option>
+                  ))}
+                </select>
 
-            <div className="col-md-4">
-              <label className="form-label">ปริมาณการกิน</label>
-              <select 
-                className="form-select"
-                value={selectedMedicine.dosage}
-                onChange={(e) => setSelectedMedicine({...selectedMedicine, dosage: e.target.value})}
-              >
-                <option value="">เลือกปริมาณ</option>
-                {templates.dosage.map((dose, i) => (
-                  <option key={i} value={dose}>{dose}</option>
-                ))}
-              </select>
-              {editingTemplate === 'dosage' ? (
-                <div className="input-group mt-2">
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="เพิ่มปริมาณใหม่"
-                    value={newTemplateValue}
-                    onChange={(e) => setNewTemplateValue(e.target.value)}
-                  />
-                  <button className="btn btn-sm btn-success" onClick={() => addTemplate('dosage')}>
-                    <Save size={14} />
+                {editingTemplateCategory === category ? (
+                  <div className="input-group mt-2">
+                    <input
+                      type="text"
+                      className="form-control form-control-sm"
+                      placeholder="เพิ่มรายการใหม่"
+                      value={newTemplateValue}
+                      onChange={(e) => setNewTemplateValue(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && addTemplate(category)}
+                    />
+                    <button className="btn btn-sm btn-success" onClick={() => addTemplate(category)}>
+                      <Save size={14} />
+                    </button>
+                    <button 
+                      className="btn btn-sm btn-secondary" 
+                      onClick={() => setEditingTemplateCategory(null)}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-sm btn-outline-primary mt-2 w-100"
+                    onClick={() => setEditingTemplateCategory(category)}
+                  >
+                    <Plus size={14} /> เพิ่มรายการ
                   </button>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setEditingTemplate(null)}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ) : (
-                <button className="btn btn-sm btn-outline-primary mt-2" onClick={() => setEditingTemplate('dosage')}>
-                  <Plus size={14} /> เพิ่มปริมาณ
-                </button>
-              )}
-            </div>
-
-            <div className="col-md-4">
-              <label className="form-label">เวลา</label>
-              <select 
-                className="form-select"
-                value={selectedMedicine.timing}
-                onChange={(e) => setSelectedMedicine({...selectedMedicine, timing: e.target.value})}
-              >
-                <option value="">เลือกเวลา</option>
-                {templates.timing.map((time, i) => (
-                  <option key={i} value={time}>{time}</option>
-                ))}
-              </select>
-              {editingTemplate === 'timing' ? (
-                <div className="input-group mt-2">
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="เพิ่มเวลาใหม่"
-                    value={newTemplateValue}
-                    onChange={(e) => setNewTemplateValue(e.target.value)}
-                  />
-                  <button className="btn btn-sm btn-success" onClick={() => addTemplate('timing')}>
-                    <Save size={14} />
-                  </button>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setEditingTemplate(null)}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ) : (
-                <button className="btn btn-sm btn-outline-primary mt-2" onClick={() => setEditingTemplate('timing')}>
-                  <Plus size={14} /> เพิ่มเวลา
-                </button>
-              )}
-            </div>
+                )}
+              </div>
+            ))}
           </div>
 
-          <button className="btn btn-primary mt-3 w-100" onClick={addMedicine}>
-            <Plus size={18} /> เพิ่มข้อบ่งใช้
+          <button className="btn btn-primary w-100 btn-lg" onClick={addMedicine}>
+            <Plus size={18} /> เพิ่มข้อบ่งใช้ยา
           </button>
         </div>
       </div>
 
-      {/* แสดงรายการยา */}
+      {/* รายการยา */}
       <div className="card mb-4 shadow-sm">
         <div className="card-body">
-          <h5 className="card-title mb-3">รายการข้อบ่งใช้ยา</h5>
+          <h5 className="card-title mb-3">📋 รายการข้อบ่งใช้ยา ({medicines.length})</h5>
           {medicines.length === 0 ? (
-            <p className="text-muted">ยังไม่มีข้อมูล</p>
+            <p className="text-muted text-center py-3">ยังไม่มีข้อมูล</p>
           ) : (
             <div className="list-group">
               {medicines.map((med) => (
@@ -290,7 +253,7 @@ export default function MedicineQRApp() {
                   key={med.id} 
                   medicine={med} 
                   onDelete={deleteMedicine}
-                  onUpdate={updateMedicineText}
+                  onUpdate={updateMedicine}
                 />
               ))}
             </div>
@@ -300,27 +263,59 @@ export default function MedicineQRApp() {
 
       {/* สร้าง QR Code */}
       {medicines.length > 0 && (
-        <div className="card shadow-sm">
-          <div className="card-body text-center">
-            <button className="btn btn-success btn-lg mb-3" onClick={generateFinalText}>
-              สร้าง QR Code
+        <div className="card mb-4 shadow-sm">
+          <div className="card-body">
+            <h5 className="card-title mb-3">📱 สร้าง QR Code</h5>
+            
+            <button
+              className="btn btn-success btn-lg w-100 mb-3"
+              onClick={generateQRCodes}
+            >
+              ✓ สร้าง QR Code ({medicines.length} รายการ)
             </button>
 
-            {qrText && (
-              <div>
-                <div className="mb-3 p-3 bg-light rounded">
-                  <pre className="mb-0" style={{ textAlign: 'left', fontSize: '14px' }}>{qrText}</pre>
-                </div>
-                <img src={generateQRCode(qrText)} alt="QR Code" className="mb-3" style={{ maxWidth: '300px' }} />
-                <div>
-                  <button className="btn btn-primary me-2" onClick={downloadQR}>
-                    <Download size={18} /> ดาวน์โหลด
+            {qrCodes.length > 0 && (
+              <>
+                <div className="d-flex gap-2 mb-4">
+                  <button
+                    className="btn btn-primary flex-grow-1"
+                    onClick={downloadAllQR}
+                  >
+                    <Download size={18} /> ดาวน์โหลด ZIP ทั้งหมด
                   </button>
-                  <button className="btn btn-secondary" onClick={printQR}>
-                    <Printer size={18} /> พิมพ์
+                  <button
+                    className="btn btn-secondary flex-grow-1"
+                    onClick={printAllQR}
+                  >
+                    <Printer size={18} /> พิมพ์ทั้งหมด
                   </button>
                 </div>
-              </div>
+
+                <div className="row g-3">
+                  {qrCodes.map((qr) => (
+                    <div key={qr.id} className="col-md-6 col-lg-4">
+                      <div className="card border-light">
+                        <div className="card-body text-center">
+                          <h6 className="card-title">รายการที่ {qr.index}</h6>
+                          <p className="text-muted small mb-2">{qr.text}</p>
+                          <img
+                            src={qr.qrUrl}
+                            alt="QR Code"
+                            className="img-fluid mb-2"
+                            style={{ maxWidth: '200px' }}
+                          />
+                          <button
+                            className="btn btn-sm btn-outline-primary w-100"
+                            onClick={() => downloadSingleQR(qr)}
+                          >
+                            <Download size={14} /> ดาวน์โหลด
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -336,26 +331,30 @@ function MedicineItem({ medicine, onDelete, onUpdate }) {
   const [editText, setEditText] = useState(medicine.text);
 
   const handleSave = () => {
-    onUpdate(medicine.id, editText);
-    setIsEditing(false);
+    if (editText.trim()) {
+      onUpdate(medicine.id, editText);
+      setIsEditing(false);
+    }
   };
 
   return (
-    <div className="list-group-item d-flex justify-content-between align-items-center">
+    <div className="list-group-item d-flex justify-content-between align-items-center p-3">
       {isEditing ? (
         <input
           type="text"
           className="form-control me-2"
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleSave()}
+          autoFocus
         />
       ) : (
-        <span>{medicine.text}</span>
+        <span className="flex-grow-1">{medicine.text}</span>
       )}
-      <div>
+      <div className="btn-group ms-2">
         {isEditing ? (
           <>
-            <button className="btn btn-sm btn-success me-1" onClick={handleSave}>
+            <button className="btn btn-sm btn-success" onClick={handleSave}>
               <Save size={16} />
             </button>
             <button className="btn btn-sm btn-secondary" onClick={() => setIsEditing(false)}>
@@ -364,10 +363,16 @@ function MedicineItem({ medicine, onDelete, onUpdate }) {
           </>
         ) : (
           <>
-            <button className="btn btn-sm btn-outline-primary me-1" onClick={() => setIsEditing(true)}>
+            <button 
+              className="btn btn-sm btn-outline-primary" 
+              onClick={() => setIsEditing(true)}
+            >
               <Edit2 size={16} />
             </button>
-            <button className="btn btn-sm btn-outline-danger" onClick={() => onDelete(medicine.id)}>
+            <button 
+              className="btn btn-sm btn-outline-danger" 
+              onClick={() => onDelete(medicine.id)}
+            >
               <Trash2 size={16} />
             </button>
           </>
